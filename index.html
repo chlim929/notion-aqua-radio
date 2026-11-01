@@ -348,6 +348,22 @@
   body:not(.night) .daynight .d, body.night .daynight .n{background:radial-gradient(circle at 50% 30%,#fff,#d6f4ff 60%,#9fdcf7); box-shadow:0 1px 4px rgba(0,40,90,.35)}
   body.night .daynight .n{background:radial-gradient(circle at 50% 30%,#4a5a9a,#25306a 70%)}
   body.night .daynight{background:rgba(20,30,70,.35); border-color:rgba(200,210,255,.45)}
+  /* 트랙 목록 / 번호 이동 */
+  .mini .txt{cursor:pointer}
+  .mini .txt:hover span{filter:brightness(1.15)}
+  .mini .txt b::after{content:" ▾"; opacity:.8}
+  #tmodal .sheet{display:flex; flex-direction:column; max-height:min(560px,86vh)}
+  .tgo{display:flex; gap:8px; align-items:center; margin-bottom:10px}
+  .tgo input{width:92px; padding:9px 10px; border-radius:12px; border:1px solid rgba(0,100,160,.35); background:#fff;
+    font:800 14px "Nunito",sans-serif; color:var(--ink); text-align:center; box-shadow:inset 0 1px 3px rgba(0,50,90,.2)}
+  .tgo span{font-weight:800; font-size:13px; color:var(--ink-soft)}
+  .tlist{overflow:auto; border-radius:14px; background:rgba(255,255,255,.7); border:1px solid rgba(0,100,160,.25); flex:1; min-height:120px}
+  .tlist button{display:flex; gap:10px; width:100%; text-align:left; border:0; background:transparent; cursor:pointer;
+    padding:9px 12px; font:700 13px "Nunito","Gowun Dodum",sans-serif; color:var(--ink); border-bottom:1px solid rgba(0,100,160,.12)}
+  .tlist button:hover{background:rgba(111,220,255,.35)}
+  .tlist button.cur{background:linear-gradient(90deg,rgba(140,235,120,.55),rgba(140,235,120,.15)); font-weight:900}
+  .tlist button i{font-style:normal; flex:none; width:30px; text-align:right; color:var(--ink-soft); font-family:"VT323",monospace; font-size:18px; line-height:1}
+  .tlist button span{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 </style>
 </head>
 <body>
@@ -439,6 +455,15 @@
         <button class="pbtn" id="copy" type="button" style="display:none">Notion용 주소 복사</button>
         <button class="pbtn ghost" id="close" type="button">닫기</button>
       </div>
+    </div>
+  </div>
+  <div class="modal" id="tmodal">
+    <div class="sheet">
+      <h3>🎵 트랙 목록</h3>
+      <div class="tgo"><input id="tnum" type="number" min="1" inputmode="numeric" placeholder="번호"><span id="tcount">/ –</span>
+        <button class="pbtn" id="tgoBtn" type="button">이동</button></div>
+      <div class="tlist" id="tlist"></div>
+      <div class="acts"><button class="pbtn ghost" id="tclose" type="button">닫기</button></div>
     </div>
   </div>
   <div class="toast" id="toast"></div>
@@ -892,6 +917,54 @@ $("track").addEventListener("click", e => {
   if (!ready) return; const r = e.currentTarget.getBoundingClientRect();
   player.seekTo((e.clientX - r.left)/r.width * player.getDuration(), true);
 });
+
+/* ================= 트랙 목록 / 번호로 이동 ================= */
+const titleCache = {};
+async function ytTitle(id){
+  if (titleCache[id]) return titleCache[id];
+  try {
+    const r = await fetch("https://www.youtube.com/oembed?format=json&url=" + encodeURIComponent("https://www.youtube.com/watch?v=" + id));
+    return (titleCache[id] = (await r.json()).title || id);
+  } catch(e){ return id; }
+}
+function currentIndex(){ try { return player.getPlaylistIndex(); } catch(e){ return 0; } }
+function playIndex(i){
+  let pl = []; try { pl = player.getPlaylist() || []; } catch(e){}
+  if (!ready || !pl.length){ toast("플레이리스트가 아직 준비되지 않았어요"); return false; }
+  if (!(i >= 0 && i < pl.length)){ toast("1 ~ " + pl.length + " 사이 번호를 입력해주세요"); return false; }
+  if (mutedAuto) unmuteNow();
+  player.playVideoAt(i); lastTitle = ""; return true;
+}
+function markCurrent(){
+  const cur = currentIndex();
+  document.querySelectorAll("#tlist button").forEach((b, k) => b.classList.toggle("cur", k === cur));
+}
+function openTracks(){
+  let pl = []; try { pl = (ready && player.getPlaylist()) || []; } catch(e){}
+  if (!pl.length){ toast("플레이리스트(여러 곡)가 연결되어 있을 때 사용할 수 있어요"); return; }
+  const box = $("tlist");
+  $("tcount").textContent = "/ " + pl.length; $("tnum").max = pl.length; $("tnum").value = "";
+  if (box.children.length !== pl.length || box.dataset.key !== pl.join(",")){
+    box.dataset.key = pl.join(",");
+    box.innerHTML = pl.map((id, k) => `<button type="button" data-i="${k}"><i>${k+1}</i><span>${titleCache[id] ? "" : "…"}</span></button>`).join("");
+    box.querySelectorAll("button").forEach((b, k) => { b.querySelector("span").textContent = titleCache[pl[k]] || "…"; });
+    (async () => {                       // 제목은 6개씩 나눠서 불러옴
+      let n = 0;
+      const worker = async () => { while (n < pl.length){ const k = n++; const t = await ytTitle(pl[k]); const sp = box.children[k] && box.children[k].querySelector("span"); if (sp) sp.textContent = t; } };
+      await Promise.all(Array.from({length: 6}, worker));
+    })();
+  }
+  $("tmodal").classList.add("show"); markCurrent();
+  const cb = box.children[currentIndex()]; if (cb) cb.scrollIntoView({block:"center"});
+  setTimeout(() => $("tnum").focus(), 60);
+}
+$("tlist").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; if (playIndex(+b.dataset.i)){ markCurrent(); $("tmodal").classList.remove("show"); } });
+function goNum(){ const n = parseInt($("tnum").value, 10); if (playIndex(n - 1)){ $("tmodal").classList.remove("show"); } }
+$("tgoBtn").onclick = goNum;
+$("tnum").addEventListener("keydown", e => { if (e.key === "Enter") goNum(); });
+$("tclose").onclick = () => $("tmodal").classList.remove("show");
+$("tmodal").addEventListener("click", e => { if (e.target.id === "tmodal") $("tmodal").classList.remove("show"); });
+document.querySelector(".mini .txt").addEventListener("click", openTracks);
 
 /* 링크 모달 */
 $("linkBtn").onclick = () => { $("modal").classList.add("show"); setTimeout(()=>$("urlIn").focus(), 50); };
