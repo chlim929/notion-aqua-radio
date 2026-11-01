@@ -931,6 +931,22 @@ $("track").addEventListener("click", e => {
 
 /* ================= Spotify 채널 ================= */
 let channel = "yt", spUri = null, spCtrl = null, spAPI = null, spState = { paused:true, pos:0, dur:0 };
+let spListName = "", spTrackUri = "", spTrackTitle = "";
+const spTitleCache = {};
+async function spotifyTitle(uri){            // spotify:track:ID → 곡 제목 (Spotify oEmbed)
+  if (spTitleCache[uri]) return spTitleCache[uri];
+  const [, type, id] = uri.split(":");
+  try {
+    const r = await fetch("https://open.spotify.com/oembed?url=" + encodeURIComponent("https://open.spotify.com/" + type + "/" + id));
+    const j = await r.json(); return (spTitleCache[uri] = j.title || "");
+  } catch(e){ return ""; }
+}
+function showSpTitle(){
+  if (channel !== "sp") return;
+  if (spTrackTitle) setTitle(spTrackTitle, spListName || "Spotify");
+  else setTitle(spListName || "Spotify 채널", "TV 화면의 ▶를 누르면 재생돼요");
+}
+async function refreshSpListName(){ spListName = spUri ? await spotifyTitle("spotify:" + spUri) : ""; showSpTitle(); }
 window.onSpotifyIframeApiReady = API => { spAPI = API; if (channel === "sp" && spUri) loadSpotify(); };
 function ensureSpotifyApi(){
   if (ensureSpotifyApi.done) return; ensureSpotifyApi.done = true;
@@ -946,6 +962,10 @@ function loadSpotify(){
     spCtrl = ctrl;
     ctrl.addListener("playback_update", e => {
       const d = e.data || {}; spState = { paused: !!d.isPaused, pos:(d.position||0)/1000, dur:(d.duration||0)/1000 };
+      if (d.playingURI && d.playingURI !== spTrackUri){
+        spTrackUri = d.playingURI; spTrackTitle = "";
+        spotifyTitle(d.playingURI).then(t => { if (spTrackUri === d.playingURI){ spTrackTitle = t; showSpTitle(); } });
+      }
       if (channel === "sp"){ setPlayingUI(!spState.paused); updateSpProgress(); }
     });
   });
@@ -966,7 +986,7 @@ function setChannel(ch, quiet){
     if (ready){ try { player.pauseVideo(); } catch(_){} }
     mutedAuto = false; $("unmute").classList.remove("show");
     $("ph").style.display = "none";
-    setTitle("Spotify 채널", "TV 화면의 ▶를 누르면 전곡이 재생돼요");
+    showSpTitle(); if (!spListName) refreshSpListName();
     $("trk").textContent = "Spotify";
     setPlayingUI(!spState.paused); updateSpProgress();
     loadSpotify();
@@ -1002,7 +1022,7 @@ $("apply").onclick = () => {
   if (!ytSrc) source = null;
   spUri = sp;
   if (ytChanged){ source = ytSrc; mutedAuto = false; $("unmute").classList.remove("show"); lastTitle = ""; if (channel === "yt") setTitle("노래를 불러오는 중…"); loadSource(ytSrc); if (channel === "sp") setTimeout(()=>{ try{ player.pauseVideo(); }catch(_){} }, 2500); }
-  if (spChanged && channel === "sp") loadSpotify();
+  if (spChanged){ spListName = ""; spTrackUri = ""; spTrackTitle = ""; if (channel === "sp"){ loadSpotify(); refreshSpListName(); } }
   if (channel === "sp" && !spUri) setChannel("yt", true);
   if (channel === "yt" && !source && spUri) setChannel("sp", true);
   if (!ytChanged && !spChanged && ytSrc) source = ytSrc;
